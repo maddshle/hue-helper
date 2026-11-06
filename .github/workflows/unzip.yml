@@ -1,0 +1,64 @@
+
+name: Extract ZIP Automatically
+
+on:
+  push:
+    paths:
+      - '**.zip'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  unzip:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Repository
+        uses: actions/checkout@v4
+
+      - name: Extract ZIP Files
+        run: |
+          python3 - <<'PY'
+          import zipfile
+          from pathlib import Path
+
+          output = Path("extracted")
+
+          for archive in Path(".").rglob("*.zip"):
+              if ".git" in archive.parts or "extracted" in archive.parts:
+                  continue
+
+              destination = output / archive.stem
+              destination.mkdir(parents=True, exist_ok=True)
+
+              with zipfile.ZipFile(archive) as z:
+                  for item in z.infolist():
+                      if item.is_dir():
+                          continue
+
+                      target = (destination / item.filename).resolve()
+
+                      if not target.is_relative_to(destination.resolve()):
+                          raise ValueError("Path ZIP tidak aman")
+
+                      target.parent.mkdir(parents=True, exist_ok=True)
+
+                      with z.open(item) as src:
+                          with open(target, "wb") as dst:
+                              dst.write(src.read())
+
+              print("Berhasil:", archive.name)
+
+          PY
+
+      - name: Save Extracted Files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add extracted/
+          git diff --cached --quiet || (
+            git commit -m "Automatically extract ZIP files"
+            git push
+          )
