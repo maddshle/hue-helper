@@ -1,5 +1,5 @@
 
-name: Extract ZIP to Main
+name: Extract ZIP Directly to Main
 
 on:
   push:
@@ -15,35 +15,66 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout Main
         uses: actions/checkout@v4
 
-      - name: Extract ZIP to Main
+      - name: Extract ZIP Directly
         run: |
           python3 - <<'PY'
           import zipfile
           from pathlib import Path
 
-          output = Path("extracted")
+          root = Path(".").resolve()
 
-          for archive in Path(".").rglob("*.zip"):
-              if ".git" in archive.parts or "extracted" in archive.parts:
-                  continue
-
-              destination = output / archive.stem
-              destination.mkdir(parents=True, exist_ok=True)
+          for archive in root.glob("*.zip"):
+              print("Extracting:", archive.name)
 
               with zipfile.ZipFile(archive) as z:
-                  for item in z.infolist():
-                      if item.is_dir():
+                  files = [
+                      i for i in z.infolist()
+                      if not i.is_dir()
+                  ]
+
+                  paths = [
+                      Path(i.filename) for i in files
+                  ]
+
+                  common = Path(
+                      __import__("os").path.commonpath(
+                          [str(p) for p in paths]
+                      )
+                  )
+
+                  if len(files) > 0 and all(
+                      len(p.parts) > len(common.parts)
+                      for p in paths
+                  ):
+                      prefix = common
+                  else:
+                      prefix = Path(".")
+
+                  for item in files:
+                      relative = Path(item.filename)
+
+                      if prefix != Path("."):
+                          relative = relative.relative_to(prefix)
+
+                      if not relative.parts:
                           continue
 
-                      target = (destination / item.filename).resolve()
+                      target = (root / relative).resolve()
 
-                      if not target.is_relative_to(destination.resolve()):
+                      if not target.is_relative_to(root):
                           raise ValueError("Unsafe ZIP path")
 
-                      target.parent.mkdir(parents=True, exist_ok=True)
+                      if target.exists():
+                          raise FileExistsError(
+                              f"File already exists: {target}"
+                          )
+
+                      target.parent.mkdir(
+                          parents=True, exist_ok=True
+                      )
 
                       with z.open(item) as src:
                           with open(target, "wb") as dst:
@@ -51,36 +82,12 @@ jobs:
 
           PY
 
-      - name: Move Files to Main Directory
-        run: |
-          python3 - <<'PY'
-          import shutil
-          from pathlib import Path
-
-          root = Path(".")
-          extracted = root / "extracted"
-
-          if extracted.exists():
-              for source in extracted.iterdir():
-                  target = root / source.name
-
-                  if target.exists():
-                      raise FileExistsError(
-                          f"File/folder sudah ada: {target}"
-                      )
-
-                  shutil.move(str(source), str(target))
-
-              shutil.rmtree(extracted)
-
-          PY
-
-      - name: Commit Changes
+      - name: Commit to Main
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --quiet || (
-            git commit -m "Extract ZIP files to main directory"
-            git push
+            git commit -m "Extract ZIP directly to main"
+            git push origin HEAD:main
           )
